@@ -1,0 +1,21 @@
+[tool.poetry]
+name = "logical-agent"
+version = "0.1.0"
+description = "Reduce the error of Agent with Logical Agents"
+authors = ["dhanaabhirajk <81916146+dhanaabhirajk@users.noreply.github.com>"]
+readme = "README.md"
+
+[tool.poetry.dependencies]
+python = ">=3.11,<3.14"
+autogen-core = "0.4.0.dev11"
+autogen-ext = {version = "0.4.0.dev11", extras = ["openai"]}
+python-dotenv = "^1.0.1"
+pydantic = "^2.10.4"
+numpy = "^2.2.0"
+scikit-learn = "^1.6.0"
+pydantic-numpy = "^7.0.0"
+
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"
