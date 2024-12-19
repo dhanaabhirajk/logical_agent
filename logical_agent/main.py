@@ -1,6 +1,7 @@
 import os
 import uuid
 import asyncio
+import logging
 from typing import List
 from dataclasses import dataclass
 from datetime import datetime
@@ -32,6 +33,10 @@ from autogen_core.models import (
 from autogen_core import SingleThreadedAgentRuntime
 from autogen_ext.models.openai import OpenAIChatCompletionClient
 
+logging.basicConfig(filename="app.log", level="DEBUG")
+
+logger = logging.getLogger(__name__)
+
 
 @dataclass
 class ListenMessage:
@@ -55,70 +60,30 @@ class SayMessage:
 openai_client = openai.OpenAI(api_key=os.environ["OPENAI_API_KEY"])
 EMBEDDING_VECTOR_DIM = 1536
 
-# @default_subscription
-class LogicalAssistant(RoutedAgent):
-    def __init__(self, model_client: ChatCompletionClient) -> None:
-        super().__init__("An assistant agent.")
-        self._model_client = model_client
-        self._chat_history: List[LLMMessage] = [
-            SystemMessage(
-                content="""Write a casual response.""",
-            )
-        ]
-
-    @message_handler
-    async def handle_observation_message(
-        self, message: ObservationMessage, ctx: MessageContext
-    ) -> None:
-        print(f"Agent {self.id} Observing")
-        self._chat_history.append(UserMessage(content=message.content, source="user"))
-        result = await self._model_client.create(self._chat_history)
-        print(f"\n{'-'*80}\nAssistant {self.type}:\n{result.content}")
-        self._chat_history.append(AssistantMessage(content=result.content, source="assistant"))  # type: ignore
-        await self.publish_message(RealObservationMessage(content=result.content), TopicId(type="assistant", source="assistant"))  # type: ignore
-
-
-class Assistant(LogicalAssistant):
-    @message_handler
-    async def handle_real_observation_message(
-        self, message: RealObservationMessage, ctx: MessageContext
-    ) -> None:
-        self._chat_history.append(UserMessage(content=message.content, source="user"))
-        result = await self._model_client.create(self._chat_history)
-        print(f"\n{'-'*80}\nAssistant {self.type}:\n{result.content}")
-        self._chat_history.append(
-            AssistantMessage(content=result.content, source="assistant")
-        )
-
-    @message_handler
-    async def handle_message(self, message: ListenMessage, ctx: MessageContext) -> None:
-        # find last assistant message
-        self._chat_history.append(UserMessage(content=message.content, source="user"))
-        result = await self._model_client.create(self._chat_history)
-        print(f"\n{'-'*80}\nAssistant {self.type}:\n{result.content}")
-        self._chat_history.append(
-            AssistantMessage(content=result.content, source="assistant")
-        )
-
+def generate_embedding(message: str):
+    # Using OpenAI's embedding API to generate an embedding for the message
+    response = openai_client.embeddings.create(
+        input="Hello, my name is Abhi", model="text-embedding-ada-002"
+    )
+    embedding = np.array(response.data[0].embedding)
+    return embedding
 
 class ChatHistory(BaseModel):
-    role: str  # Role of the person sending the message (e.g., "user", "agent")
-    message: str  # The message text
+    message: LLMMessage  # The message text
     vector: np_array_pydantic_annotated_typing(data_type=np.float32)  # The vector embedding of the message
 
 
 class AgentPerspective(BaseModel):
-    agent: object
-    chat_history: List[ChatHistory] = []
+    chat_history: List[ChatHistory] = Field(default_factory=list)
     perspective_vector: np_array_pydantic_annotated_typing(data_type=np.float32) = Field(default_factory= lambda: np.zeros(EMBEDDING_VECTOR_DIM)) # the dimension of the embedding vector
 
     
-    def add_chat_message(self, role: str, message: str, generate_embedding_fn):
+    def add_chat_message(self, message: LLMMessage):
         # Generate the embedding for the new message
-        embedding = generate_embedding_fn(message)
+        embedding = generate_embedding(message.content)
         
         # Create a new ChatHistory object
-        chat_history_entry = ChatHistory(role=role, message=message, vector=embedding)
+        chat_history_entry = ChatHistory(message=message, vector=embedding)
         
         # Append it to the chat history
         self.chat_history.append(chat_history_entry)
@@ -129,6 +94,52 @@ class AgentPerspective(BaseModel):
         else:
             self.perspective_vector = embedding
 
+    def get_chat_history_for_llm(self):
+        return [entry.message for entry in self.chat_history]
+
+
+# @default_subscription
+class LogicalAssistant(RoutedAgent):
+    def __init__(self, model_client: ChatCompletionClient, agent_perspective: AgentPerspective) -> None:
+        super().__init__("An assistant agent.")
+        self._model_client = model_client
+        self._agent_perspective = agent_perspective
+        self._chat_history: List[LLMMessage] = [
+            SystemMessage(
+                content="""Write a casual response.""",
+            )
+        ]
+
+    @message_handler
+    async def handle_observation_message(
+        self, message: ObservationMessage, ctx: MessageContext
+    ) -> None:
+        logger.debug(f"Agent {self.id} Observing")
+
+        self._agent_perspective.add_chat_message(UserMessage(content=message.content, source="user"))
+        result = await self._model_client.create(self._agent_perspective.get_chat_history_for_llm())
+        logger.debug(f"\n{'-'*80}\nAssistant {self.type}:\n{result.content}")
+        self._agent_perspective.add_chat_message(AssistantMessage(content=result.content, source="assistant"))
+        await self.publish_message(RealObservationMessage(content=result.content), TopicId(type="assistant", source="assistant"))  # type: ignore
+
+
+class Assistant(LogicalAssistant):
+    @message_handler
+    async def handle_real_observation_message(
+        self, message: RealObservationMessage, ctx: MessageContext
+    ) -> None:
+        self._agent_perspective.add_chat_message(UserMessage(content=message.content, source="user"))
+        result = await self._model_client.create(self._agent_perspective.get_chat_history_for_llm())
+        logger.debug(f"\n{'-'*80}\nAssistant {self.type}:\n{result.content}")
+        self._agent_perspective.add_chat_message(AssistantMessage(content=result.content, source="assistant"))
+
+    @message_handler
+    async def handle_message(self, message: ListenMessage, ctx: MessageContext) -> None:
+        # find last assistant message
+        self._agent_perspective.add_chat_message(UserMessage(content=message.content, source="user"))
+        result = await self._model_client.create(self._agent_perspective.get_chat_history_for_llm())
+        logger.debug(f"\n{'-'*80}\nAssistant {self.type}:\n{result.content}")
+        self._agent_perspective.add_chat_message(AssistantMessage(content=result.content, source="assistant"))
 
 
 class GroupManager:
@@ -138,6 +149,7 @@ class GroupManager:
         self.agent_factory = agent_factory
         self.agent_class = agent_class
         self.agents = {}  # Dictionary with agent_id as key and AgentPerspective as value
+        self.agent_perspectives = {}
         self.num_of_logical_agents = num_of_logical_agents
         self.num_active_logical_agents = num_active_logical_agents  # New parameter
 
@@ -146,38 +158,39 @@ class GroupManager:
             await self.add_agent(f"logical_assistant_{i}")
 
     async def add_agent(self, agent_id):
-        print(f"Agent {agent_id} added.")
+        logger.debug(f"Agent {agent_id} added.")
+        agent_perspective = AgentPerspective(chat_history=[])
         agent = await self.agent_class.register(
             self.runtime,
             agent_id,
-            lambda: self.agent_factory(),
+            lambda: self.agent_factory(agent_perspective),
         )
-        await self.runtime.add_subscription(
-            TypeSubscription(topic_type=self.topic_type, agent_type=agent.type)
-        )
-        self.agents[agent_id] = AgentPerspective(agent=agent, chat_history=[], last_activity=None, activity_score=0)
+        self.agent_perspectives[agent_id] = agent_perspective
+        self.agents[agent_id] = agent
+        await self.subscribe_agent(agent_id=agent_id)
 
     async def subscribe_agent(self, agent_id):
-        print(f"Agent {agent_id} subscribed.")
+        logger.debug(f"Agent {agent_id} subscribed.")  
         if agent_id in self.agents:
-            agent_perspective = self.agents[agent_id]
+            agent = self.agents[agent_id]
             await self.runtime.add_subscription(
-                TypeSubscription(topic_type=self.topic_type, agent_type=agent_perspective.agent.type)
+                TypeSubscription(topic_type=self.topic_type, agent_type=agent.type)
             )
 
     async def unsubscribe_agent(self, agent_id):
-        print(f"Agent {agent_id} unsubscribed.")
+        logger.debug(f"Agent {agent_id} unsubscribed.")
 
         if agent_id in self.agents:
-            agent_perspective = self.agents[agent_id]
+            agent = self.agents[agent_id]
             await self.runtime.remove_subscription(
-                TypeSubscription(topic_type=self.topic_type, agent_type=agent_perspective.agent.type)
+                TypeSubscription(topic_type=self.topic_type, agent_type=agent.type)
             )
 
     async def observe(self, message, session_id, logical_agent_epochs, generate_embedding_fn):
+        logger.debug(f"Topic of group manager: {self.topic_type}")
         for _ in range(logical_agent_epochs):
             await self.runtime.publish_message(
-                ObservationMessage(message),
+                ObservationMessage(content=message),
                 TopicId(type=self.topic_type, source=session_id),
                 message_id="observation_message",
             )
@@ -187,30 +200,25 @@ class GroupManager:
                 if message.message_id == "observation_message"
             ]:
                 await asyncio.sleep(1)
-            # Append the message to the chat history of all agents and update the perspective vector
-            for agent_perspective in self.agents.values():
-                agent_perspective.add_chat_message(role="user", message=message, generate_embedding_fn=generate_embedding_fn)
-                agent_perspective.last_activity = datetime.now()
-                agent_perspective.activity_score += 1
-                if "recommend" in message.lower():
-                    agent_perspective.topic_history.append("recommend")
 
     async def say_again(self, message, session_id):
         await self.runtime.publish_message(
             ListenMessage(message), TopicId(type="assistant", source=session_id)
         )
 
-    async def index_agents(self, num_active_logical_agents: int):
+    async def index_agents(self, num_active_logical_agents: int, message: str):
         # Criteria: find the nearest agents based on their vector similarity (cosine similarity)
         agent_vectors = [
             (agent_id, perspective.perspective_vector)
-            for agent_id, perspective in self.agents.items()
+            for agent_id, perspective in self.agent_perspectives.items()
         ]
+
+        embedding = generate_embedding(message=message)
         
         # Compute cosine similarity between agent vectors
         similarities = []
         for agent_id, agent_vector in agent_vectors:
-            similarity = cosine_similarity([agent_vector], [self.agents["logical_assistant_1"].perspective_vector])[0][0]
+            similarity = cosine_similarity([agent_vector], [embedding])[0][0]
             similarities.append((agent_id, similarity))
 
         # Sort agents by their similarity score
@@ -218,29 +226,27 @@ class GroupManager:
         
         # Activate top 'num_active_logical_agents' agents
         for agent_id, _ in similarities[:num_active_logical_agents]:
-            await self.subscribe_agent(agent_id)
+            try:
+                await self.subscribe_agent(agent_id)
+            except ValueError as e:
+                logger.error(str(e))
 
-
-def generate_embedding(message: str):
-    # Using OpenAI's embedding API to generate an embedding for the message
-    response = openai_client.embeddings.create(
-        input="Hello, my name is Abhi", model="text-embedding-ada-002"
-    )
-    embedding = np.array(response.data[0].embedding)
-    return embedding
 
 async def main():
     # Create a local embedded runtime.
     runtime = SingleThreadedAgentRuntime()
 
+    assistant_perspective = AgentPerspective(chat_history=[])
+
     # Register the assistant.
     assistant = await Assistant.register(
         runtime,
         "assistant",
-        lambda: Assistant(
+        lambda : Assistant(
             OpenAIChatCompletionClient(
                 model="gpt-4o-mini", api_key=os.getenv("OPENAI_API_KEY")
-            )
+            ),
+            agent_perspective=assistant_perspective
         ),
     )
     await runtime.add_subscription(
@@ -251,15 +257,16 @@ async def main():
     )
 
     # Create and manage logical assistants using GroupManager.
-    total_logical_agents = 3
+    total_logical_agents = 1
     num_active_logical_agents = 2  # For example, we want to activate the top 2 agents based on vector similarity
     logical_assistant_manager = GroupManager(
         runtime,
         topic_type="logical_assistant",
-        agent_factory=lambda: LogicalAssistant(
+        agent_factory=lambda agent_perspective: LogicalAssistant(
             OpenAIChatCompletionClient(
                 model="gpt-4o-mini", api_key=os.getenv("OPENAI_API_KEY")
-            )
+            ),
+            agent_perspective=agent_perspective,
         ),
         agent_class=LogicalAssistant,
         num_of_logical_agents=total_logical_agents,
@@ -268,6 +275,7 @@ async def main():
 
     # Initialize all logical assistants.
     await logical_assistant_manager.initialize_agents()
+    runtime.start()
 
     # Make the agents observe and say again.
     session_id = str(uuid.uuid4())
@@ -276,16 +284,20 @@ async def main():
 
     await logical_assistant_manager.observe(message, session_id, logical_agent_epochs, generate_embedding_fn=generate_embedding)
 
+    # Index agents to recommend subscriptions based on vector similarity.
+    await logical_assistant_manager.index_agents(num_active_logical_agents, message=message)
+
     await logical_assistant_manager.say_again(message, session_id)
 
-    # Index agents to recommend subscriptions based on vector similarity.
-    await logical_assistant_manager.index_agents(num_active_logical_agents)
+    while runtime.unprocessed_messages:
+        await asyncio.sleep(1)
 
+    print(assistant_perspective.chat_history[-1])
     # Start the runtime and stop when idle.
-    runtime.start()
     await runtime.stop_when_idle()
 
 
+
 if __name__ == "__main__":
-    print("Application Started")
+    logger.debug("Application Started")
     asyncio.run(main())
