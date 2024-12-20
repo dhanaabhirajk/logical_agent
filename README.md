@@ -61,11 +61,14 @@ Your focus is here. Use the real agent as a template and write your own agent. U
 
 Clone the repo and change base directory to repo directory
 
+Copy the .env.example to .env and place your `OPENAI_API_KEY`. The current implementation only supports openai provider.
+
 First install all the package dependencies using poetry.
 
 ```bash
 poetry install
 ```
+
 
 Run the agent
 
