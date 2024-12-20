@@ -1,8 +1,10 @@
-# logical_agent
+# Logical agent
 
 One Agent, but Multi agent. Reduce the error of Agent with Multi Logical Agents
 
-Logical agents solve the real project agent problems 
+Humans learn from others. Real Agent learns from Logical Agents
+
+Logical agents solve the real project agent problems.
 
 - One Agent, but multi agent Collabaration
 - Improved Communication layer of agents
@@ -10,6 +12,14 @@ Logical agents solve the real project agent problems
 - No more prompts to be maintained
 - Architecture fits into current Agentic Framworks
 
+Logical Agent is open source architecture for LLM Agent
+
+- [Key Features](#key-features)
+- [Layers](#layers)
+- [Applications](#applications)
+- [Quickstart](#quickstart)
+- [Roadmap](#roadmap)
+- [Limitations](#limitations)
 
 ## Key Features
 
@@ -17,14 +27,21 @@ Logical agents solve the real project agent problems
 - Agent is made in a way where human in loop is invloved (interruption)
 - Continuous training in inference
 
+```text
+Note: Predicts the letters in strawberry correctly. Try out "How many r's in strawberry?"
+```
+
 ### Agent have high accuracy on τ-bench
 
 A good threshold of logical agents will improve τ-bench.
 
-
 ### Agent is made in a way where human in loop is invloved (interruption)
 
-Agent has two stages observation of logical agents and Listen user.
+Agent has two stages. Make agents to observe and say. Say can be changed with interruption.
+
+```text
+Core Logic: Humans learn from others. Real Agent learns from Logical Agents
+```
 
 ## Layers
 
@@ -69,16 +86,32 @@ First install all the package dependencies using poetry.
 poetry install
 ```
 
-
-Run the agent
+### Running the agent
 
 ```bash
-poetry run python app/main.py
+> poetry run python examples/main.py
+  _                _           _      _                    _   
+ | |    ___   __ _(_) ___ __ _| |    / \   __ _  ___ _ __ | |_ 
+ | |   / _ \ / _` | |/ __/ _` | |   / _ \ / _` |/ _ \ '_ \| __|
+ | |__| (_) | (_| | | (_| (_| | |  / ___ \ (_| |  __/ | | | |_ 
+ |_____\___/ \__, |_|\___\__,_|_| /_/   \_\__, |\___|_| |_|\__|
+             |___/                        |___/                
+Started 1 Logical Agents
+To exit, say exit
+----------------------------------
+> You: How many r's in strawberry?
+> Agent: Yes, that's correct! The word "strawberry" contains three "r's."
+> You: exit
 ```
 
-## Future Works
+## Roadmap
 
 - Use Logical Agents to implement the above mentioned applications and improve the Logical Agents
 - Improve history usage in logical agent as well
 - Implement variety of perspectives like role model perspective and improve indexing
 - Release this a pacakge to use across projects
+
+### Limitations
+
+- The response would include like repeating the message. The chat history usage needs to be optimized.
+- The current agent is set with casual agent

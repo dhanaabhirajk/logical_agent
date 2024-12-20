@@ -33,7 +33,6 @@ from autogen_core.models import (
 from autogen_core import SingleThreadedAgentRuntime
 from autogen_ext.models.openai import OpenAIChatCompletionClient
 
-logging.basicConfig(filename="app.log", level="DEBUG")
 
 logger = logging.getLogger(__name__)
 
@@ -186,7 +185,7 @@ class GroupManager:
                 TypeSubscription(topic_type=self.topic_type, agent_type=agent.type)
             )
 
-    async def observe(self, message, session_id, logical_agent_epochs, generate_embedding_fn):
+    async def observe(self, message, session_id, logical_agent_epochs):
         logger.debug(f"Topic of group manager: {self.topic_type}")
         for _ in range(logical_agent_epochs):
             await self.runtime.publish_message(
@@ -194,17 +193,14 @@ class GroupManager:
                 TopicId(type=self.topic_type, source=session_id),
                 message_id="observation_message",
             )
-            while [
-                message
-                for message in self.runtime.unprocessed_messages
-                if message.message_id == "observation_message"
-            ]:
+            while not self.runtime.idle:
                 await asyncio.sleep(1)
 
     async def say_again(self, message, session_id):
         await self.runtime.publish_message(
             ListenMessage(message), TopicId(type="agent", source=session_id)
         )
+
 
     async def index_agents(self, num_active_logical_agents: int, message: str):
         # Criteria: find the nearest agents based on their vector similarity (cosine similarity)
@@ -225,12 +221,21 @@ class GroupManager:
         similarities.sort(key=lambda x: x[1], reverse=True)
         
         # Activate top 'num_active_logical_agents' agents
+        active_agents = set()
         for agent_id, _ in similarities[:num_active_logical_agents]:
             try:
                 await self.subscribe_agent(agent_id)
+                active_agents.add(agent_id)
             except ValueError as e:
                 logger.error(str(e))
 
+        # Unsubscribe remaining agents
+        for agent_id in self.agents:
+            if agent_id not in active_agents:
+                try:
+                    await self.unsubscribe_agent(agent_id)
+                except ValueError as e:
+                    logger.error(str(e))
 
 async def main():
     # Create a local embedded runtime.
@@ -289,8 +294,10 @@ async def main():
 
     await logical_agent_manager.say_again(message, session_id)
 
-    while runtime.unprocessed_messages:
+    while runtime.idle:
         await asyncio.sleep(1)
+
+    print(agent_perspective.get_chat_history_for_llm())
 
     print(agent_perspective.chat_history[-1])
     # Start the runtime and stop when idle.

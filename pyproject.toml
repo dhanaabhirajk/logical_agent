@@ -4,6 +4,9 @@ version = "0.1.0"
 description = "Reduce the error of Agent with Logical Agents"
 authors = ["dhanaabhirajk <81916146+dhanaabhirajk@users.noreply.github.com>"]
 readme = "README.md"
+packages = [
+    { include = "logical_agent"}
+]
 
 [tool.poetry.dependencies]
 python = ">=3.11,<3.14"
@@ -14,6 +17,7 @@ pydantic = "^2.10.4"
 numpy = "^2.2.0"
 scikit-learn = "^1.6.0"
 pydantic-numpy = "^7.0.0"
+typer = "^0.15.1"
 
 
 [build-system]
