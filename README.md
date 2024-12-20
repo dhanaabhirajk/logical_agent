@@ -23,9 +23,12 @@ Logical Agent is open source architecture for LLM Agent
 
 ## Key Features
 
+- Continuous training in inference
+- Scalable based on logical agents
+- Real time observation
+- Multi Perspective
 - Agent have high accuracy on τ-bench.
 - Agent is made in a way where human in loop is invloved (interruption)
-- Continuous training in inference
 
 ```text
 Note: Predicts the letters in strawberry correctly. Try out "How many r's in strawberry?"
