@@ -1,3 +1,5 @@
+"""Logical Agent."""
+
 import os
 import uuid
 import asyncio
@@ -97,7 +99,6 @@ class AgentPerspective(BaseModel):
         return [entry.message for entry in self.chat_history]
 
 
-# @default_subscription
 class LogicalAgent(RoutedAgent):
     def __init__(self, model_client: ChatCompletionClient, agent_perspective: AgentPerspective) -> None:
         super().__init__("Agent")
