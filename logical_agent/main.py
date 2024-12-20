@@ -99,9 +99,9 @@ class AgentPerspective(BaseModel):
 
 
 # @default_subscription
-class LogicalAssistant(RoutedAgent):
+class LogicalAgent(RoutedAgent):
     def __init__(self, model_client: ChatCompletionClient, agent_perspective: AgentPerspective) -> None:
-        super().__init__("An assistant agent.")
+        super().__init__("Agent")
         self._model_client = model_client
         self._agent_perspective = agent_perspective
         self._chat_history: List[LLMMessage] = [
@@ -120,10 +120,10 @@ class LogicalAssistant(RoutedAgent):
         result = await self._model_client.create(self._agent_perspective.get_chat_history_for_llm())
         logger.debug(f"\n{'-'*80}\nAssistant {self.type}:\n{result.content}")
         self._agent_perspective.add_chat_message(AssistantMessage(content=result.content, source="assistant"))
-        await self.publish_message(RealObservationMessage(content=result.content), TopicId(type="assistant", source="assistant"))  # type: ignore
+        await self.publish_message(RealObservationMessage(content=result.content), TopicId(type="agent", source="assistant"))  # type: ignore
 
 
-class Assistant(LogicalAssistant):
+class RealAgent(LogicalAgent):
     @message_handler
     async def handle_real_observation_message(
         self, message: RealObservationMessage, ctx: MessageContext
@@ -135,7 +135,7 @@ class Assistant(LogicalAssistant):
 
     @message_handler
     async def handle_message(self, message: ListenMessage, ctx: MessageContext) -> None:
-        # find last assistant message
+        # find last agent message
         self._agent_perspective.add_chat_message(UserMessage(content=message.content, source="user"))
         result = await self._model_client.create(self._agent_perspective.get_chat_history_for_llm())
         logger.debug(f"\n{'-'*80}\nAssistant {self.type}:\n{result.content}")
@@ -155,7 +155,7 @@ class GroupManager:
 
     async def initialize_agents(self):
         for i in range(1, self.num_of_logical_agents + 1):
-            await self.add_agent(f"logical_assistant_{i}")
+            await self.add_agent(f"logical_agent_{i}")
 
     async def add_agent(self, agent_id):
         logger.debug(f"Agent {agent_id} added.")
@@ -203,7 +203,7 @@ class GroupManager:
 
     async def say_again(self, message, session_id):
         await self.runtime.publish_message(
-            ListenMessage(message), TopicId(type="assistant", source=session_id)
+            ListenMessage(message), TopicId(type="agent", source=session_id)
         )
 
     async def index_agents(self, num_active_logical_agents: int, message: str):
@@ -236,45 +236,45 @@ async def main():
     # Create a local embedded runtime.
     runtime = SingleThreadedAgentRuntime()
 
-    assistant_perspective = AgentPerspective(chat_history=[])
+    agent_perspective = AgentPerspective(chat_history=[])
 
-    # Register the assistant.
-    assistant = await Assistant.register(
+    # Register the agent.
+    agent = await RealAgent.register(
         runtime,
-        "assistant",
-        lambda : Assistant(
+        "agent",
+        lambda : RealAgent(
             OpenAIChatCompletionClient(
                 model="gpt-4o-mini", api_key=os.getenv("OPENAI_API_KEY")
             ),
-            agent_perspective=assistant_perspective
+            agent_perspective=agent_perspective
         ),
     )
     await runtime.add_subscription(
-        TypeSubscription(topic_type="assistant", agent_type=assistant.type)
+        TypeSubscription(topic_type="agent", agent_type=agent.type)
     )
     await runtime.add_subscription(
-        TypeSubscription(topic_type="logical_assistant", agent_type=assistant.type)
+        TypeSubscription(topic_type="logical_agent", agent_type=agent.type)
     )
 
-    # Create and manage logical assistants using GroupManager.
+    # Create and manage logical agents using GroupManager.
     total_logical_agents = 1
     num_active_logical_agents = 2  # For example, we want to activate the top 2 agents based on vector similarity
-    logical_assistant_manager = GroupManager(
+    logical_agent_manager = GroupManager(
         runtime,
-        topic_type="logical_assistant",
-        agent_factory=lambda agent_perspective: LogicalAssistant(
+        topic_type="logical_agent",
+        agent_factory=lambda agent_perspective: LogicalAgent(
             OpenAIChatCompletionClient(
                 model="gpt-4o-mini", api_key=os.getenv("OPENAI_API_KEY")
             ),
             agent_perspective=agent_perspective,
         ),
-        agent_class=LogicalAssistant,
+        agent_class=LogicalAgent,
         num_of_logical_agents=total_logical_agents,
         num_active_logical_agents=num_active_logical_agents
     )
 
-    # Initialize all logical assistants.
-    await logical_assistant_manager.initialize_agents()
+    # Initialize all logical agents.
+    await logical_agent_manager.initialize_agents()
     runtime.start()
 
     # Make the agents observe and say again.
@@ -282,17 +282,17 @@ async def main():
     message = "Hi my name is Abhi"
     logical_agent_epochs = 1
 
-    await logical_assistant_manager.observe(message, session_id, logical_agent_epochs, generate_embedding_fn=generate_embedding)
+    await logical_agent_manager.observe(message, session_id, logical_agent_epochs, generate_embedding_fn=generate_embedding)
 
     # Index agents to recommend subscriptions based on vector similarity.
-    await logical_assistant_manager.index_agents(num_active_logical_agents, message=message)
+    await logical_agent_manager.index_agents(num_active_logical_agents, message=message)
 
-    await logical_assistant_manager.say_again(message, session_id)
+    await logical_agent_manager.say_again(message, session_id)
 
     while runtime.unprocessed_messages:
         await asyncio.sleep(1)
 
-    print(assistant_perspective.chat_history[-1])
+    print(agent_perspective.chat_history[-1])
     # Start the runtime and stop when idle.
     await runtime.stop_when_idle()
 
